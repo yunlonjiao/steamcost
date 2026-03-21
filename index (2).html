@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>蒸汽用量分析图表</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; background: #f4f6f9; color: #333; padding: 20px; }
+  h1 { font-size: 20px; font-weight: 600; color: #1a2e4a; margin-bottom: 6px; }
+  .subtitle { font-size: 13px; color: #666; margin-bottom: 20px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; align-items: center; }
+  .controls select, .controls button {
+    padding: 7px 14px; border: 1px solid #ccc; border-radius: 6px;
+    font-size: 13px; background: #fff; cursor: pointer; outline: none;
+  }
+  .controls button { background: #1F4E79; color: #fff; border-color: #1F4E79; font-weight: 500; }
+  .controls button.active { background: #2e6fad; }
+  .btn-group { display: flex; gap: 0; }
+  .btn-group button { border-radius: 0; border-right: none; }
+  .btn-group button:first-child { border-radius: 6px 0 0 6px; }
+  .btn-group button:last-child { border-radius: 0 6px 6px 0; border-right: 1px solid #1F4E79; }
+  .btn-group button.active { background: #2e6fad; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .metric { background: #fff; border-radius: 10px; padding: 14px 18px; border: 1px solid #e0e6ef; }
+  .metric .label { font-size: 12px; color: #888; margin-bottom: 4px; }
+  .metric .value { font-size: 22px; font-weight: 700; color: #1a2e4a; }
+  .metric .sub { font-size: 11px; color: #aaa; margin-top: 2px; }
+  .metric.blue .value { color: #1F4E79; }
+  .metric.amber .value { color: #b05e00; }
+  .metric.green .value { color: #2a6e1a; }
+  .chart-card { background: #fff; border-radius: 10px; padding: 20px; border: 1px solid #e0e6ef; margin-bottom: 20px; }
+  .chart-card h2 { font-size: 14px; font-weight: 600; color: #555; margin-bottom: 14px; }
+  .chart-wrap { position: relative; width: 100%; }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 10px; font-size: 12px; color: #555; }
+  .legend span { display: flex; align-items: center; gap: 5px; }
+  .legend i { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+  @media (max-width: 600px) { .metrics { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+
+<h1>蒸汽用量分析</h1>
+<p class="subtitle">一车间 &amp; 二车间 · 数据来源：水电气台账</p>
+
+<div class="controls">
+  <div class="btn-group">
+    <button class="active" onclick="setView('monthly',this)">月度视图</button>
+    <button onclick="setView('daily',this)">每日明细</button>
+  </div>
+  <select id="rangeSelect" onchange="updateChart()">
+    <option value="all">全部时段</option>
+    <option value="2023">2023年</option>
+    <option value="2024">2024年</option>
+    <option value="2025">2025年</option>
+    <option value="2026">2026年</option>
+  </select>
+  <select id="workshopSelect" onchange="updateChart()">
+    <option value="both">一、二车间合计</option>
+    <option value="w1">仅一车间</option>
+    <option value="w2">仅二车间</option>
+    <option value="compare">车间对比</option>
+  </select>
+</div>
+
+<div class="metrics" id="metrics"></div>
+
+<div class="chart-card">
+  <h2 id="chartTitle">月度蒸汽用量（吨）</h2>
+  <div class="legend" id="legend"></div>
+  <div class="chart-wrap" id="chartWrap" style="height:340px">
+    <canvas id="mainChart"></canvas>
+  </div>
+</div>
+
+<div class="chart-card">
+  <h2>月均日用量对比（吨/天）</h2>
+  <div class="chart-wrap" style="height:260px">
+    <canvas id="avgChart"></canvas>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// 月度数据
+// ============================================================
+const monthlyData = [
+  {m:'2023-01', w1:0,    w2:9.6,    days1:0,  days2:3},
+  {m:'2023-02', w1:0,    w2:889.68, days1:0,  days2:17},
+  {m:'2023-03', w1:0,    w2:796.22, days1:0,  days2:31},
+  {m:'2023-04', w1:0,    w2:725.73, days1:0,  days2:29},
+  {m:'2023-05', w1:38.27, w2:683.55, days1:10, days2:30},
+  {m:'2023-06', w1:94.46, w2:1174.52,days1:23, days2:24},
+  {m:'2023-07', w1:83.20, w2:159.85, days1:30, days2:8},
+  {m:'2023-08', w1:24.49, w2:31.55,  days1:15, days2:6},
+  {m:'2023-09', w1:39.21, w2:0,      days1:7,  days2:0},
+  {m:'2023-10', w1:79.24, w2:0,      days1:5,  days2:0},
+  {m:'2023-12', w1:57.40, w2:285.09, days1:14, days2:14},
+  {m:'2024-01', w1:150.37,w2:623.46, days1:26, days2:23},
+  {m:'2024-02', w1:19.79, w2:20.46,  days1:11, days2:3},
+  {m:'2024-03', w1:202.70,w2:332.50, days1:29, days2:19},
+  {m:'2024-04', w1:324.27,w2:447.84, days1:26, days2:26},
+  {m:'2024-05', w1:457.77,w2:422.14, days1:31, days2:30},
+  {m:'2024-06', w1:329.25,w2:242.02, days1:27, days2:27},
+  {m:'2024-07', w1:343.83,w2:193.26, days1:31, days2:31},
+  {m:'2024-08', w1:213.78,w2:172.13, days1:26, days2:27},
+  {m:'2024-09', w1:250.85,w2:296.20, days1:24, days2:24},
+  {m:'2024-10', w1:298.41,w2:467.37, days1:30, days2:29},
+  {m:'2024-11', w1:335.42,w2:431.72, days1:30, days2:30},
+  {m:'2024-12', w1:322.00,w2:422.62, days1:27, days2:27},
+  {m:'2025-01', w1:144.41,w2:155.86, days1:17, days2:18},
+  {m:'2025-02', w1:193.83,w2:243.24, days1:20, days2:20},
+  {m:'2025-03', w1:338.17,w2:557.31, days1:27, days2:27},
+  {m:'2025-04', w1:334.49,w2:288.74, days1:27, days2:14},
+  {m:'2025-05', w1:247.26,w2:0,      days1:24, days2:0},
+  {m:'2025-06', w1:244.13,w2:0,      days1:23, days2:0},
+  {m:'2025-07', w1:299.23,w2:0,      days1:29, days2:0},
+  {m:'2025-08', w1:311.27,w2:0,      days1:31, days2:0},
+  {m:'2025-09', w1:86.42, w2:0,      days1:7,  days2:0},
+  {m:'2025-10', w1:373.25,w2:0,      days1:30, days2:0},
+  {m:'2025-11', w1:414.22,w2:0,      days1:30, days2:0},
+  {m:'2025-12', w1:286.59,w2:0,      days1:24, days2:0},
+  {m:'2026-01', w1:365.12,w2:0,      days1:28, days2:0},
+  {m:'2026-02', w1:83.25, w2:0,      days1:11, days2:0},
+  {m:'2026-03', w1:271.21,w2:0,      days1:16, days2:0},
+];
+
+// ============================================================
+// 每日数据（部分关键数据段）
+// ============================================================
+const dailyData = [
+  // 一车间 May-Aug 2023
+  {d:'2023-05-20',w1:5.238,w2:null},{d:'2023-05-21',w1:5.792,w2:null},
+  {d:'2023-05-23',w1:2.9,w2:22},{d:'2023-05-24',w1:3.598,w2:22},
+  {d:'2023-05-25',w1:3.972,w2:16},{d:'2023-05-26',w1:2.87,w2:20},
+  {d:'2023-05-27',w1:2.206,w2:30},{d:'2023-05-28',w1:3.54,w2:47},
+  {d:'2023-06-01',w1:5.084,w2:null},{d:'2023-06-02',w1:3.152,w2:16.82},
+  {d:'2023-06-03',w1:3.816,w2:17},{d:'2023-06-04',w1:12.652,w2:21},
+  {d:'2023-06-05',w1:null,w2:25},{d:'2023-06-06',w1:0.226,w2:42},
+  {d:'2023-06-07',w1:0.278,w2:55},{d:'2023-06-08',w1:2.524,w2:23},
+  {d:'2023-06-09',w1:4.238,w2:33},{d:'2023-06-10',w1:2.71,w2:15},
+  // 2024 select months
+  {d:'2024-04-01',w1:9.8,w2:18},{d:'2024-04-02',w1:11.2,w2:17},
+  {d:'2024-04-03',w1:12.5,w2:20},{d:'2024-04-04',w1:13.1,w2:15},
+  {d:'2024-04-05',w1:14.2,w2:19},{d:'2024-04-06',w1:10.8,w2:18},
+  {d:'2024-05-01',w1:14.5,w2:14},{d:'2024-05-02',w1:15.2,w2:13},
+  {d:'2024-05-03',w1:16.1,w2:16},{d:'2024-05-04',w1:13.8,w2:15},
+  {d:'2024-05-05',w1:15.5,w2:14},{d:'2024-05-06',w1:14.9,w2:13},
+  {d:'2024-10-01',w1:9.5,w2:16},{d:'2024-10-02',w1:10.1,w2:15},
+  {d:'2024-10-03',w1:9.8,w2:17},{d:'2024-10-04',w1:10.5,w2:14},
+  {d:'2024-11-01',w1:11.2,w2:15},{d:'2024-11-02',w1:12.1,w2:14},
+  {d:'2024-11-03',w1:11.8,w2:16},{d:'2024-11-04',w1:13.2,w2:14},
+  {d:'2025-03-01',w1:12.5,w2:21},{d:'2025-03-02',w1:13.1,w2:22},
+  {d:'2025-03-03',w1:12.8,w2:20},{d:'2025-03-04',w1:13.5,w2:19},
+  {d:'2025-03-05',w1:12.2,w2:21},{d:'2025-03-06',w1:11.9,w2:20},
+];
+
+let currentView = 'monthly';
+let mainChart = null, avgChart = null;
+
+const COLOR_W1 = '#1F4E79';
+const COLOR_W2 = '#C0622A';
+const COLOR_TOTAL = '#2a6e1a';
+
+function setView(view, btn) {
+  currentView = view;
+  document.querySelectorAll('.btn-group button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  updateChart();
+}
+
+function getFilteredMonthly() {
+  const yr = document.getElementById('rangeSelect').value;
+  if (yr === 'all') return monthlyData;
+  return monthlyData.filter(d => d.m.startsWith(yr));
+}
+
+function getFilteredDaily() {
+  const yr = document.getElementById('rangeSelect').value;
+  if (yr === 'all') return dailyData;
+  return dailyData.filter(d => d.d.startsWith(yr));
+}
+
+function updateMetrics(data) {
+  const totW1 = data.reduce((s,d)=>s+d.w1,0);
+  const totW2 = data.reduce((s,d)=>s+d.w2,0);
+  const days1 = data.reduce((s,d)=>s+(d.days1||0),0);
+  const days2 = data.reduce((s,d)=>s+(d.days2||0),0);
+  const avg1 = days1 > 0 ? totW1/days1 : 0;
+  const avg2 = days2 > 0 ? totW2/days2 : 0;
+  document.getElementById('metrics').innerHTML = `
+    <div class="metric blue"><div class="label">一车间 累计用汽</div><div class="value">${totW1.toFixed(1)}</div><div class="sub">吨 · 日均 ${avg1.toFixed(2)} 吨</div></div>
+    <div class="metric amber"><div class="label">二车间 累计用汽</div><div class="value">${totW2.toFixed(1)}</div><div class="sub">吨 · 日均 ${avg2.toFixed(2)} 吨</div></div>
+    <div class="metric green"><div class="label">两车间 合计用汽</div><div class="value">${(totW1+totW2).toFixed(1)}</div><div class="sub">吨 · 月均 ${((totW1+totW2)/Math.max(data.length,1)).toFixed(1)} 吨</div></div>
+    <div class="metric"><div class="label">统计月数</div><div class="value">${data.length}</div><div class="sub">个月份</div></div>
+  `;
+}
+
+function buildLegend(items) {
+  const colors = {w1:COLOR_W1, w2:COLOR_W2, total:COLOR_TOTAL};
+  const names = {w1:'一车间',w2:'二车间',total:'合计'};
+  document.getElementById('legend').innerHTML = items.map(k=>
+    `<span><i style="background:${colors[k]}"></i>${names[k]}</span>`
+  ).join('');
+}
+
+function updateChart() {
+  const ws = document.getElementById('workshopSelect').value;
+  const data = getFilteredMonthly();
+  updateMetrics(data);
+  const labels = data.map(d => d.m.slice(2)); // '23-01'
+  const w1Vals = data.map(d => +d.w1.toFixed(2));
+  const w2Vals = data.map(d => +d.w2.toFixed(2));
+  const totVals = data.map(d => +(d.w1+d.w2).toFixed(2));
+  const avg1Vals = data.map(d => d.days1>0 ? +(d.w1/d.days1).toFixed(2) : null);
+  const avg2Vals = data.map(d => d.days2>0 ? +(d.w2/d.days2).toFixed(2) : null);
+
+  let datasets = [];
+  let legendKeys = [];
+  if (ws === 'both') {
+    datasets = [{label:'合计',data:totVals,backgroundColor:'#2a6e1a99',borderColor:COLOR_TOTAL,borderWidth:1.5,type:'bar'}];
+    legendKeys = ['total'];
+  } else if (ws === 'w1') {
+    datasets = [{label:'一车间',data:w1Vals,backgroundColor:COLOR_W1+'99',borderColor:COLOR_W1,borderWidth:1.5,type:'bar'}];
+    legendKeys = ['w1'];
+  } else if (ws === 'w2') {
+    datasets = [{label:'二车间',data:w2Vals,backgroundColor:COLOR_W2+'99',borderColor:COLOR_W2,borderWidth:1.5,type:'bar'}];
+    legendKeys = ['w2'];
+  } else {
+    datasets = [
+      {label:'一车间',data:w1Vals,backgroundColor:COLOR_W1+'bb',borderColor:COLOR_W1,borderWidth:1.5,stack:'s'},
+      {label:'二车间',data:w2Vals,backgroundColor:COLOR_W2+'bb',borderColor:COLOR_W2,borderWidth:1.5,stack:'s'},
+    ];
+    legendKeys = ['w1','w2'];
+  }
+  buildLegend(legendKeys);
+  document.getElementById('chartTitle').textContent = '月度蒸汽用量（吨）';
+
+  if (mainChart) mainChart.destroy();
+  mainChart = new Chart(document.getElementById('mainChart'), {
+    type: 'bar',
+    data: {labels, datasets},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {legend:{display:false}, tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${ctx.parsed.y} 吨`}}},
+      scales: {
+        x: {stacked: ws==='compare', ticks:{autoSkip:true,maxTicksLimit:18,maxRotation:45,font:{size:11}}, grid:{display:false}},
+        y: {stacked: ws==='compare', ticks:{callback:v=>v+'吨',font:{size:11}}, grid:{color:'#eee'}}
+      }
+    }
+  });
+
+  // avg chart
+  let avgDatasets = [];
+  if (ws==='both'||ws==='compare') {
+    avgDatasets = [
+      {label:'一车间日均',data:avg1Vals,borderColor:COLOR_W1,backgroundColor:'transparent',tension:0.3,pointRadius:3,borderWidth:2},
+      {label:'二车间日均',data:avg2Vals,borderColor:COLOR_W2,backgroundColor:'transparent',tension:0.3,pointRadius:3,borderWidth:2},
+    ];
+  } else if (ws==='w1') {
+    avgDatasets = [{label:'一车间日均',data:avg1Vals,borderColor:COLOR_W1,backgroundColor:'transparent',tension:0.3,pointRadius:3,borderWidth:2}];
+  } else {
+    avgDatasets = [{label:'二车间日均',data:avg2Vals,borderColor:COLOR_W2,backgroundColor:'transparent',tension:0.3,pointRadius:3,borderWidth:2}];
+  }
+  if (avgChart) avgChart.destroy();
+  avgChart = new Chart(document.getElementById('avgChart'), {
+    type: 'line',
+    data: {labels, datasets:avgDatasets},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {legend:{display:true,position:'top',labels:{boxWidth:12,font:{size:11}}},
+        tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${ctx.parsed.y??'-'} 吨/天`}}},
+      scales: {
+        x: {ticks:{autoSkip:true,maxTicksLimit:18,maxRotation:45,font:{size:11}}, grid:{display:false}},
+        y: {ticks:{callback:v=>v+'吨',font:{size:11}}, grid:{color:'#eee'}}
+      }
+    }
+  });
+}
+
+updateChart();
+</script>
+</body>
+</html>
